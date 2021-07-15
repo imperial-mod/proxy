@@ -1,0 +1,25 @@
+{
+  "name": "hypixel-proxy",
+  "version": "1.0.0",
+  "description": "Proxy for Hypixel extracted from Duels Overlay (https://github.com/duels-overlay/overlay)",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "node ./dist/index.js",
+    "watch": "tsc -w",
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duels-overlay/proxy"
+  },
+  "author": "zani",
+  "license": "MIT",
+  "dependencies": {
+    "minecraft-protocol": "^1.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^16.3.1",
+    "typed-emitter": "^1.3.1",
+    "typescript": "^4.3.5"
+  }
+}
