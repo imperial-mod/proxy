@@ -15,11 +15,11 @@
   "author": "zani",
   "license": "MIT",
   "dependencies": {
-    "minecraft-protocol": "^1.25.0"
+    "minecraft-protocol": "^1.25.0",
+    "typed-emitter": "^1.3.1"
   },
   "devDependencies": {
     "@types/node": "^16.3.1",
-    "typed-emitter": "^1.3.1",
     "typescript": "^4.3.5"
   }
 }
