@@ -1,6 +1,6 @@
 {
   "name": "hypixel-proxy",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Proxy for Hypixel extracted from Duels Overlay (https://github.com/duels-overlay/overlay)",
   "main": "dist/index.js",
   "scripts": {
