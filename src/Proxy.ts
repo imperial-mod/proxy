@@ -16,6 +16,7 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 		"scoreboard_objective",
 		"scoreboard_score",
 		"scoreboard_display_objective",
+		"scoreboard_team",
 		"chat"
 	]
 	private packetsToParseClient = ["chat"]
@@ -29,6 +30,7 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 	private players: Map<string, Player> = new Map<string, Player>()
 	private uuidToId: Map<string, number> = new Map<string, number>()
 	private idToUuid: Map<number, string> = new Map<number, string>()
+	private bots: string[] = []
 
 	private emitJoin: boolean = false
 
@@ -54,7 +56,7 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 		})
 		this.srv.on("login", (client) => {
 			const addr = client.socket.remoteAddress
-			console.log(`Connected to proxy`)
+			this.emit("connected_local")
 			this.endedClient = false
 			this.endedTargetClient = false
 			this.client = client
@@ -119,9 +121,9 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 												uuid,
 												username
 											})
-											this.emit("player_join", uuid, username)
+											this.emit("player_join", uuid, username, this.bots.includes(username))
 										}
-									}, 4)
+									}, 16)
 								}
 							} else if (meta.name == "named_entity_spawn") {
 								this.idToUuid.set(packet.entityId, packet.playerUUID)
@@ -153,6 +155,16 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 									this.emitJoin = packet.name == "PreScoreboard"
 									if (!this.emitJoin) {
 										this.players.clear()
+										this.bots.splice(0, this.bots.length)
+									}
+								}
+							} else if (meta.name == "scoreboard_team" && this.emitJoin) {
+								if (packet.players && packet.prefix) {
+									if (packet.prefix == "§c"
+									&& packet.color == 12
+									&& packet.suffix == ""
+									&& packet.mode == 0) {
+										this.bots.push(packet.players[0])
 									}
 								}
 							}
@@ -178,7 +190,7 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 			})
 			this.targetClient.on("state", (state) => {
 				if (state == states.PLAY) {
-					console.log(`Proxy ready`)
+					this.emit("connected_remote")
 				}
 			})
 		})
