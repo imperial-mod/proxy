@@ -30,6 +30,8 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 	private players: Map<string, Player> = new Map<string, Player>()
 	private uuidToId: Map<string, number> = new Map<string, number>()
 	private idToUuid: Map<number, string> = new Map<number, string>()
+	private commands: Map<string, Function> = new Map<string, Function>()
+
 	private bots: string[] = []
 
 	private emitJoin: boolean = false
@@ -90,12 +92,12 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 						if (this.packetsToParseClient.includes(meta.name)) {
 							const packet = (client as any).deserializer.parsePacketBuffer(raw).data.params
 							if (meta.name == "chat") {
-								if (packet.message.trim() == "/list") {
-									let string = `\u00A77Online (\u00A7b${this.players.size}\u00A77): `
-									for (const [key, value] of this.players) {
-										string += `\u00A7a${value.username} `
-									}
-									client.write("chat", { message: JSON.stringify({ text: string }), position: 0 })
+								const args = (packet.message.trim().replace("/", "").split(" ") as string[])
+								const commandName = args.shift()
+								if (commandName && packet.message.startsWith("/") && this.commands.get(commandName)) {
+									const cb = this.commands.get(commandName)
+									if (cb)
+										cb(...args)
 									return
 								}
 							}
@@ -205,6 +207,18 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 	public writeServer = (name: string, data: any) => {
 		if (!this.endedTargetClient) {
 			this.targetClient.write(name, data)
+		}
+	}
+
+	public registerCommand = (name: string, handler: Function) => {
+		if (!this.commands.get(name)) {
+			this.commands.set(name, handler)
+		}
+	}
+
+	public unregisterCommand = (name: string) => {
+		if (this.commands.get(name)) {
+			this.commands.delete(name)
 		}
 	}
 }
