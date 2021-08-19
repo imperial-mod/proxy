@@ -4,6 +4,7 @@ import * as mc from "minecraft-protocol"
 import { Player } from "./types/Player"
 import { ProxyEvents } from "./types/ProxyEvents"
 import { ChatMessage } from "./types/ChatMessage"
+import { Location } from "./types/Location"
 
 export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>) {
 	private port: number
@@ -17,24 +18,35 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 		"scoreboard_score",
 		"scoreboard_display_objective",
 		"scoreboard_team",
-		"chat"
+		"chat",
+		"spawn_position"
 	]
 	private packetsToParseClient = ["chat"]
 
-	private targetClient: mc.Client
+	private inboundPacketHandler: undefined | ((raw: Buffer, meta: mc.PacketMeta) => boolean | void)
+	private outboundPacketHandler: undefined | ((raw: Buffer, meta: mc.PacketMeta) => boolean | void)
+
+	private inboundListeners: Map<string, (packet: any, raw: Buffer) => boolean | void> = new Map<string, (packet: any, raw: Buffer) => boolean | void>()
+	private outboundListeners: Map<string, (packet: any, raw: Buffer) => boolean | void> = new Map<string, (packet: any, raw: Buffer) => boolean | void>()
+
+	public client: mc.Client
+	public targetClient: mc.Client
+
 	private srv: mc.Server
 	private endedTargetClient = false
 	private endedClient = false
-	private client: mc.Client
 
 	private players: Map<string, Player> = new Map<string, Player>()
 	private uuidToId: Map<string, number> = new Map<string, number>()
 	private idToUuid: Map<number, string> = new Map<number, string>()
 	private commands: Map<string, Function> = new Map<string, Function>()
+	private awaitingLocraw: boolean = false
 
 	private bots: string[] = []
 
 	private emitJoin: boolean = false
+
+	public location: Location = { server: "limbo" }
 
 	constructor(port?: number, auth?: "microsoft" | "mojang") {
 		super()
@@ -86,9 +98,18 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 				profilesFolder: require("minecraft-folder-path"),
 				auth: this.auth
 			} as any))
-			client.on("raw", async (raw, meta) => {
+			client.on("raw", async (raw: Buffer, meta: mc.PacketMeta) => {
 				if (meta.state == states.PLAY && this.targetClient.state == states.PLAY) {
 					if (!this.endedTargetClient) {
+						if (this.outboundPacketHandler && await this.outboundPacketHandler(raw, meta)) return
+						if (this.outboundListeners.get(meta.name)) {
+							const cb = this.outboundListeners.get(meta.name)
+							const packet = (client as any).deserializer.parsePacketBuffer(raw).data.params
+							if (cb) {
+								const result = cb(packet, raw)
+								if (result) return
+							}
+						}
 						if (this.packetsToParseClient.includes(meta.name)) {
 							const packet = (client as any).deserializer.parsePacketBuffer(raw).data.params
 							if (meta.name == "chat") {
@@ -107,9 +128,18 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 					}
 				}
 			})
-			this.targetClient.on("raw", async (raw, meta) => {
+			this.targetClient.on("raw", async (raw: Buffer, meta: mc.PacketMeta) => {
 				if (meta.state == states.PLAY && client.state == states.PLAY) {
 					if (!this.endedClient) {
+						if (this.inboundPacketHandler && await this.inboundPacketHandler(raw, meta)) return
+						if (this.inboundListeners.get(meta.name)) {
+							const cb = this.inboundListeners.get(meta.name)
+							const packet = (this.targetClient as any).deserializer.parsePacketBuffer(raw).data.params
+							if (cb) {
+								const result = cb(packet, raw)
+								if (result) return
+							}
+						}
 						if (this.packetsToParseServer.includes(meta.name)) {
 							const packet = (this.targetClient as any).deserializer.parsePacketBuffer(raw).data.params
 							if (meta.name == "player_info") {
@@ -151,7 +181,20 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 								}
 								this.players.clear()
 							} else if (meta.name == "chat") {
-								this.emit("chat", (JSON.parse(packet.message) as ChatMessage))
+								const parsedMessage = (JSON.parse(packet.message) as ChatMessage)
+								try {
+									if (this.awaitingLocraw && parsedMessage.color == "white") {
+										const locraw = (JSON.parse(parsedMessage.text) as Location)
+
+										this.awaitingLocraw = false
+										this.emit("location", locraw)
+
+										return
+									}
+								} catch {
+
+								}
+								this.emit("chat", parsedMessage)
 							} else if (meta.name == "scoreboard_objective") {
 								if (packet.action == 0) {
 									this.emitJoin = packet.name == "PreScoreboard"
@@ -163,12 +206,15 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 							} else if (meta.name == "scoreboard_team" && this.emitJoin) {
 								if (packet.players && packet.prefix) {
 									if (packet.prefix == "§c"
-									&& packet.color == 12
-									&& packet.suffix == ""
-									&& packet.mode == 0) {
+										&& packet.color == 12
+										&& packet.suffix == ""
+										&& packet.mode == 0) {
 										this.bots.push(packet.players[0])
 									}
 								}
+							} else if (meta.name == "spawn_position") {
+								this.awaitingLocraw = true
+								this.targetClient.write("chat", { message: "/locraw" })
 							}
 						}
 
@@ -210,15 +256,29 @@ export class Proxy extends (EventEmitter as new () => TypedEmitter<ProxyEvents>)
 		}
 	}
 
-	public registerCommand = (name: string, handler: Function) => {
-		if (!this.commands.get(name)) {
-			this.commands.set(name, handler)
-		}
+	public registerCommand = (name: string, handler: (...args: string[]) => {}) => {
+		this.commands.set(name, handler)
 	}
 
 	public unregisterCommand = (name: string) => {
 		if (this.commands.get(name)) {
 			this.commands.delete(name)
 		}
+	}
+
+	public handleInboundPacket = (name: string, handler: (packet: any, raw: Buffer) => boolean | void) => {
+		this.inboundListeners.set(name, handler)
+	}
+
+	public handleOutboundPacket = (name: string, handler: (packet: any, raw: Buffer) => boolean | void) => {
+		this.outboundListeners.set(name, handler)
+	}
+
+	public setInboundPacketHandler = (handler: (raw: Buffer, meta: mc.PacketMeta) => boolean | void) => {
+		this.inboundPacketHandler = handler
+	}
+
+	public setOutboundPacketHandler = (handler: (raw: Buffer, meta: mc.PacketMeta) => boolean | void) => {
+		this.outboundPacketHandler = handler
 	}
 }

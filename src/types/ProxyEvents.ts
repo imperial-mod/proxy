@@ -1,4 +1,5 @@
 import { ChatMessage } from "./ChatMessage"
+import { Location } from "./Location"
 
 export interface ProxyEvents {
 	client_end: () => void
@@ -10,4 +11,5 @@ export interface ProxyEvents {
 	connected_remote: () => void
 	connected_local: () => void
 	chat: (message: ChatMessage) => void
+	location: (location: Location) => void
 }
